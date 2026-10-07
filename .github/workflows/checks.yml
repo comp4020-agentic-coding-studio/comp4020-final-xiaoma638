@@ -40,6 +40,8 @@ jobs:
         run: pnpm check
         env:
           APP_URL: http://localhost:8080
+          # The test client supplies the protocol normally set by Fly's proxy.
+          APP_PROTOCOL_HEADER: x-forwarded-proto
       - name: Show the app's output
         # what the container printed, so a crash or slow boot is visible
         if: ${{ failure() }}

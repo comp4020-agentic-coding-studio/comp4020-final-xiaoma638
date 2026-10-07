@@ -3,6 +3,7 @@ import type { TestProject } from "vitest/node";
 declare module "vitest" {
   export interface ProvidedContext {
     baseUrl: string;
+    protocolHeader: string;
   }
 }
 
@@ -13,10 +14,15 @@ declare module "vitest" {
 // up to a minute, since some stacks take a while to boot or migrate.
 export default async function setup(project: TestProject): Promise<void> {
   const baseUrl = process.env.APP_URL ?? "http://localhost:8080";
+  // The Docker test run takes the place of Fly's trusted reverse proxy.
+  // Direct local-preview checks must leave this unset so a missing server
+  // protocol configuration remains visible in the cookie regression test.
+  const protocolHeader = process.env.APP_PROTOCOL_HEADER?.trim() ?? "";
+  const headers = protocolHeader ? { [protocolHeader]: new URL(baseUrl).protocol.slice(0, -1) } : {};
 
   for (let attempt = 0; ; attempt++) {
     try {
-      await fetch(baseUrl);
+      await fetch(baseUrl, { headers });
       break;
     } catch {
       // not up yet
@@ -30,4 +36,5 @@ export default async function setup(project: TestProject): Promise<void> {
   }
 
   project.provide("baseUrl", baseUrl);
+  project.provide("protocolHeader", protocolHeader);
 }

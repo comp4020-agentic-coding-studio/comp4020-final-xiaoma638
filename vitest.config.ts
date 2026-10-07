@@ -6,5 +6,7 @@ export default defineConfig({
   test: {
     include: ["spec/**/*.test.ts"],
     globalSetup: ["./spec/global-setup.ts"],
+    // deadline and reveal checks wait out a real (5 s minimum) answering window
+    testTimeout: 20_000,
   },
 });
