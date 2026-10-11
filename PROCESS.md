@@ -43,3 +43,23 @@ Another fix protected unsaved answers. A save response must not replace newer te
 The latest code check passed all 55 tests in 11 files, with no Svelte errors or warnings. The production build also passed. Browser checks used two identities to join, answer, view results, like answers and read history. Layout checks used desktop and phone sizes of 1920×1080 and 390×844. These were developer checks, not classmate testing or a full accessibility review.
 
 I still need to verify the app and saved data on Fly, finish the README argument and sources, and ask classmates to use the app without help. The code changes are currently in one large commit. The decision records explain the work, but smaller commits would show the process more clearly. I plan to commit future fixes separately.
+
+## Crit 9: all at once
+
+Crit 9, 12 October 2026. I again used an AI agent to help draft this section from the session record.
+
+### Real-time, and one decision about it
+
+The app was already real-time: the server sends only a version number over SSE, and each browser fetches the data it may see ([ADR 2](doc/adr/0002-live-updates.md)). In the interaction check, updates reached other sessions in about 30 ms locally. The decision this crit asks for is one level up, so I chose what other people see during silent answering. Only the number of submitted answers is shared, not who is online, who has finished or who is typing, and that includes the host. [ADR 13](doc/adr/0013-what-others-see-before-reveal.md) compares five options against README item 1 and lists what the choice costs, such as a host not being able to nudge one person. It is in [9f37a37](https://github.com/comp4020-agentic-coding-studio/comp4020-final-xiaoma638/commit/9f37a37).
+
+### Learning from similar tools
+
+I asked the agent to study similar sites and add their strengths, checking each addition before moving on. From Mentimeter, Slido and EasyRetro it added question starters, one-tap durations, result export and "Ask again" ([ADR 12](doc/adr/0012-starters-export-and-reuse.md)). When I said the app felt only average to use, it walked through the flow on a phone first and found concrete problems: the answer box was below the fold, a saved answer looked like a disabled button, cards were tall, and returning users had to scroll past the join form. I chose to fix them in order, one at a time, with a check after each ([ADR 14](doc/adr/0014-first-use-friction.md)). Those checks found side effects that the first versions missed: keyboard focus was lost when the submit button disappeared, a like count wrapped onto two lines, and a long list of spaces pushed the join form down. All of this landed in [1c866d0](https://github.com/comp4020-agentic-coding-studio/comp4020-final-xiaoma638/commit/1c866d0).
+
+### Changing a core rule
+
+I then asked why a host could only create one question. The agent explained it was the original scope, offered three models, and I chose a queue. I also asked for questions without a time limit that the host ends. This changed a promise in the README, so the rules, tests and a new [ADR 15](doc/adr/0015-question-queue-and-untimed.md) changed together, and timed questions still cannot be revealed early. Testing the migration on a copy of a database with real data showed that it would have stopped the app from starting on Fly, because SQLite ignored the foreign-key setting inside the migration. That fix is in [623b487](https://github.com/comp4020-agentic-coding-studio/comp4020-final-xiaoma638/commit/623b487) and the feature in [0b78b85](https://github.com/comp4020-agentic-coding-studio/comp4020-final-xiaoma638/commit/0b78b85). The same review found that members could read the one waiting draft before it started, so drafts are now host-only.
+
+### Checks and what is still open
+
+`pnpm check` passes 75 tests, including new tests for the queue, draft privacy and untimed reveal. The interaction check passes 25 of 25. Each change was also checked with scripted Chrome flows at 390×844 and desktop sizes. The agent's test scripts were wrong several times, for example by using inputs over the length limits, and that was caught by reading the failures rather than loosening the checks. This week's first commit is large because earlier work was never committed separately; later changes are split by purpose. I still need classmates to try the app without help, and the twenty-person load target is still unmeasured.
