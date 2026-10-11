@@ -170,6 +170,20 @@ function requireQuestion(tx: Tx, questionId: string, participantId: string | nul
   return { q, m };
 }
 
+/** The question being answered or discussed right now, if any. At most one per org. */
+function liveQuestion(tx: Tx, orgId: string): Question | undefined {
+  return tx
+    .select()
+    .from(questions)
+    .where(and(eq(questions.orgId, orgId), inArray(questions.phase, ["COLLECTING", "REVEALED"])))
+    .get();
+}
+
+/** Queued drafts are the host's notes: members can't read one before it starts. */
+function requireVisible(q: Question, role: string) {
+  if (q.phase === "DRAFT" && role !== "host") throw notFound();
+}
+
 function reload(tx: Tx, questionId: string): Question {
   return tx.select().from(questions).where(eq(questions.id, questionId)).get()!;
 }
@@ -351,11 +365,18 @@ export function snapshot(orgId: string, participantId: string | null): Snapshot 
     reconcile(tx, ctx, orgId, "read");
     const org = tx.select().from(orgs).where(eq(orgs.id, orgId)).get()!;
     const memberCount = tx.select({ n: count() }).from(memberships).where(eq(memberships.orgId, orgId)).get()?.n ?? 0;
-    const open = tx
-      .select()
-      .from(questions)
-      .where(and(eq(questions.orgId, orgId), ne(questions.phase, "CLOSED")))
-      .get();
+    const live = liveQuestion(tx, orgId);
+    // Only the host sees what's queued; members learn a question when it starts.
+    const queue =
+      m.role === "host"
+        ? tx
+            .select()
+            .from(questions)
+            .where(and(eq(questions.orgId, orgId), eq(questions.phase, "DRAFT")))
+            .orderBy(asc(questions.createdAt), asc(questions.id))
+            .all()
+            .map((q) => view(tx, q, m.participantId, ctx.now))
+        : [];
     const closed = tx
       .select({
         id: questions.id,
@@ -374,7 +395,8 @@ export function snapshot(orgId: string, participantId: string | null): Snapshot 
       now: ctx.now,
       org: { id: org.id, name: org.name, joinCode: org.joinCode, memberCount },
       me: { id: m.participantId, nickname: m.nickname, isHost: m.role === "host" },
-      current: open ? view(tx, open, m.participantId, ctx.now) : null,
+      current: live ? view(tx, live, m.participantId, ctx.now) : null,
+      queue,
       history,
     };
   });
@@ -383,6 +405,7 @@ export function snapshot(orgId: string, participantId: string | null): Snapshot 
 export function questionDetail(questionId: string, participantId: string | null): QuestionView {
   return write((tx, ctx) => {
     const { q, m } = requireQuestion(tx, questionId, participantId);
+    requireVisible(q, m.role);
     reconcile(tx, ctx, q.orgId, "read");
     return view(tx, reload(tx, q.id), m.participantId, ctx.now);
   });
@@ -395,6 +418,7 @@ export function historyDetail(
 ): { question: QuestionView; orgId: string; isHost: boolean } {
   return write((tx, ctx) => {
     const { q, m } = requireQuestion(tx, questionId, participantId);
+    requireVisible(q, m.role);
     reconcile(tx, ctx, q.orgId, "read");
     return { question: view(tx, reload(tx, q.id), m.participantId, ctx.now), orgId: q.orgId, isHost: m.role === "host" };
   });
@@ -412,13 +436,12 @@ function parseQuestion(body: Record<string, unknown>) {
   if (
     typeof durationSec !== "number" ||
     !Number.isInteger(durationSec) ||
-    durationSec < LIMITS.minDurationSec ||
-    durationSec > LIMITS.maxDurationSec
+    (durationSec !== LIMITS.untimed && (durationSec < LIMITS.minDurationSec || durationSec > LIMITS.maxDurationSec))
   ) {
     throw new AppError(
       400,
       "invalid",
-      `Duration must be a whole number of seconds from ${LIMITS.minDurationSec} to ${LIMITS.maxDurationSec}.`,
+      `Duration must be a whole number of seconds from ${LIMITS.minDurationSec} to ${LIMITS.maxDurationSec}, or no limit.`,
       { field: "durationSec" },
     );
   }
@@ -448,15 +471,7 @@ export function createQuestion(actor: Actor, orgId: string, body: Record<string,
     const m = requireMember(tx, orgId, actor.participantId);
     if (m.role !== "host") throw hostOnly();
     const parsed = parseQuestion(body);
-    reconcile(tx, ctx, orgId, "write");
-    const busy = tx
-      .select({ id: questions.id })
-      .from(questions)
-      .where(and(eq(questions.orgId, orgId), ne(questions.phase, "CLOSED")))
-      .get();
-    if (busy) {
-      throw new AppError(409, "question_open", "Close the current question before starting another.");
-    }
+    // Drafts queue up freely; only starting one is limited to one live question at a time.
     const questionId = randomUUID();
     tx.insert(questions)
       .values({
@@ -495,7 +510,7 @@ export function updateDraft(actor: Actor, questionId: string, body: Record<strin
   });
 }
 
-export function startCollection(actor: Actor, questionId: string): { deadline: number } {
+export function startCollection(actor: Actor, questionId: string): { deadline: number | null } {
   return write((tx, ctx) => {
     const { q, m } = requireQuestion(tx, questionId, actor.participantId);
     const fields = { requestId: actor.requestId, orgId: q.orgId, questionId, participantId: actor.participantId };
@@ -503,10 +518,15 @@ export function startCollection(actor: Actor, questionId: string): { deadline: n
     if (q.phase !== "DRAFT") {
       throw refuse("collection_started", fields, new AppError(409, "already_started", "Collection has already started."));
     }
-    const deadline = ctx.now + q.durationSec * 1000;
+    reconcile(tx, ctx, q.orgId, "write");
+    if (liveQuestion(tx, q.orgId)) {
+      throw refuse("collection_started", fields, new AppError(409, "question_live", "Finish the current question before starting the next."));
+    }
+    // An untimed question has no deadline: it collects until the host reveals it.
+    const deadline = q.durationSec === LIMITS.untimed ? null : ctx.now + q.durationSec * 1000;
     tx.update(questions).set({ phase: "COLLECTING", deadline }).where(eq(questions.id, q.id)).run();
     ctx.touch(q.orgId);
-    ctx.after(() => scheduleReveal(q.orgId, q.id, deadline));
+    if (deadline !== null) ctx.after(() => scheduleReveal(q.orgId, q.id, deadline));
     log("collection_started", { ...fields, durationSec: q.durationSec, deadline, outcome: "ok" });
     return { deadline };
   });
@@ -534,6 +554,43 @@ export function closeQuestion(actor: Actor, questionId: string): { closedAt: num
 }
 
 // ---------------------------------------------------------------- responses
+
+/**
+ * Reveals an untimed question on the host's word. A timed question still
+ * reveals only at its deadline, so this never shortens a promised window.
+ * The phase check and the update share a transaction with submissions, so
+ * nothing is accepted after the reveal commits.
+ */
+export function revealNow(actor: Actor, questionId: string): { revealedAt: number } {
+  return write((tx, ctx) => {
+    const { q, m } = requireQuestion(tx, questionId, actor.participantId);
+    const fields = { requestId: actor.requestId, orgId: q.orgId, questionId, participantId: actor.participantId };
+    if (m.role !== "host") throw refuse("question_revealed", fields, hostOnly());
+    if (q.deadline !== null || q.durationSec !== LIMITS.untimed) {
+      throw refuse("question_revealed", fields, new AppError(409, "timed", "This question reveals by itself when its time is up."));
+    }
+    if (q.phase !== "COLLECTING") {
+      throw refuse("question_revealed", fields, new AppError(409, "not_collecting", q.phase === "DRAFT" ? "Start the question first." : "Results are already revealed."));
+    }
+    tx.update(questions).set({ phase: "REVEALED", revealedAt: ctx.now }).where(eq(questions.id, q.id)).run();
+    ctx.touch(q.orgId);
+    log("question_revealed", { ...fields, trigger: "host", deadline: null, outcome: "ok" });
+    return { revealedAt: ctx.now };
+  });
+}
+
+export function deleteDraft(actor: Actor, questionId: string): { deleted: true } {
+  return write((tx, ctx) => {
+    const { q, m } = requireQuestion(tx, questionId, actor.participantId);
+    if (m.role !== "host") throw hostOnly();
+    if (q.phase !== "DRAFT") throw new AppError(409, "locked", "Only a draft can be deleted. Started questions stay in the history.");
+    tx.delete(options).where(eq(options.questionId, q.id)).run();
+    tx.delete(questions).where(eq(questions.id, q.id)).run();
+    ctx.touch(q.orgId);
+    log("question_deleted", { requestId: actor.requestId, orgId: q.orgId, questionId, outcome: "ok" });
+    return { deleted: true };
+  });
+}
 
 export function submitResponse(actor: Actor, questionId: string, body: Record<string, unknown>): MyResponse {
   // A late write is refused, but the reveal it discovered still commits, so the

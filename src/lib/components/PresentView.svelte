@@ -26,7 +26,7 @@
     return invite.href;
   });
   // Late joiners may still answer, so the invite stays up until the reveal.
-  const showInvite = $derived(!q || q.phase === "DRAFT" || q.phase === "COLLECTING");
+  const showInvite = $derived(!q || q.phase === "COLLECTING");
 
   let fullscreen = $state(false);
   onMount(() => {
@@ -67,15 +67,17 @@
       {#if !q}
         <h1 id="present-h" class="prompt quiet">Waiting for the next question</h1>
       {:else}
-        <PhaseBanner phase={q.phase} kind={q.kind} />
+        <PhaseBanner phase={q.phase} kind={q.kind} timed={q.deadline !== null} />
         <h1 id="present-h" class="prompt">{q.prompt}</h1>
 
-        {#if q.phase === "DRAFT"}
-          <p class="lead muted">Starting soon. Join now to be ready.</p>
-        {:else if q.phase === "COLLECTING" && q.deadline}
+        {#if q.phase === "COLLECTING"}
           <div class="progress">
             <div class="clock">
-              <Countdown deadline={q.deadline} durationSec={q.durationSec} serverNow={() => live.serverNow()} />
+              {#if q.deadline}
+                <Countdown deadline={q.deadline} durationSec={q.durationSec} serverNow={() => live.serverNow()} />
+              {:else}
+                <p class="no-limit">No time limit</p>
+              {/if}
             </div>
             <p class="submitted" aria-live="polite">
               {#key q.submittedCount}<span class="num bump">{q.submittedCount}</span>{/key}
@@ -107,6 +109,7 @@
 </div>
 
 <style>
+  .no-limit { margin: 0; font-family: var(--font-display); font-size: clamp(1.6rem, 3vw, 2.6rem); font-weight: 600; color: var(--muted); }
   /* Larger type everywhere on the shared screen, including shared components. */
   :global(html:has(.present)) { font-size: clamp(16px, 1.15vw, 24px); }
   :global(main:has(.present)) { max-width: none; padding: 0; }

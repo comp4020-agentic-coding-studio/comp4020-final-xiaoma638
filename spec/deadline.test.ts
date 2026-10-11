@@ -67,11 +67,5 @@ describe("deadline", () => {
     expect(again.status).toBe(409);
   });
 
-  it("allows only one open question per organization", async () => {
-    const host = new Client();
-    const { orgId } = await newOrg(host);
-    await startQuestion(host, orgId, { kind: "open" }, 30);
-    const second = await host.req("POST", `/api/orgs/${orgId}/questions`, { kind: "open", prompt: "two", durationSec: 30 });
-    expect(second.status).toBe(409);
-  });
+  // One live question at a time, with drafts queued behind it: spec/queue.test.ts (ADR 15).
 });

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Phase, QuestionKind } from "#lib/domain/rules.ts";
-  let { phase, kind = "open" }: { phase: Phase; kind?: QuestionKind } = $props();
+  let { phase, kind = "open", timed = true }: { phase: Phase; kind?: QuestionKind; timed?: boolean } = $props();
 
   const TEXT: Record<Phase, { name: string; what: string }> = {
     DRAFT: { name: "Draft", what: "Review hasn't started." },
@@ -10,7 +10,9 @@
   };
   const guidance = $derived(phase === "REVEALED" && kind === "choice"
     ? "Compare the votes."
-    : TEXT[phase].what);
+    : phase === "COLLECTING" && !timed
+      ? "Answers stay hidden until the host reveals them."
+      : TEXT[phase].what);
 </script>
 
 <p class="banner" style:--phase="var(--phase-{phase.toLowerCase()})" role="status" aria-atomic="true">

@@ -1,6 +1,6 @@
 import { actor } from "#lib/server/actor.ts";
 import { handle, readJson } from "#lib/server/errors.ts";
-import { questionDetail, updateDraft } from "#lib/server/service.ts";
+import { deleteDraft, questionDetail, updateDraft } from "#lib/server/service.ts";
 import type { RequestHandler } from "./$types";
 
 export const GET: RequestHandler = ({ params, locals, setHeaders }) => {
@@ -10,3 +10,10 @@ export const GET: RequestHandler = ({ params, locals, setHeaders }) => {
 
 export const PUT: RequestHandler = (event) =>
   handle(async () => updateDraft(actor(event), event.params.questionId, await readJson(event.request)));
+
+export const DELETE: RequestHandler = (event) =>
+  handle(async () => {
+    const who = actor(event);
+    await readJson(event.request);
+    return deleteDraft(who, event.params.questionId);
+  });

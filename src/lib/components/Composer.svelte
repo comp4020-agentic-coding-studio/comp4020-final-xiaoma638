@@ -24,6 +24,7 @@
     { sec: 180, label: "3m" },
     { sec: 300, label: "5m" },
     { sec: 600, label: "10m" },
+    { sec: LIMITS.untimed, label: "No limit" },
   ];
 
   // Common first questions for a crit or retro. Offered only while the
@@ -141,19 +142,22 @@
     <legend>Answering time</legend>
     <div class="durations">
       {#each durationChoices as d (d.sec)}
-        <label class="duration" class:selected={Number(durationSec) === d.sec}>
+        <label class="duration" class:selected={Number(durationSec) === d.sec} class:wide={d.sec === LIMITS.untimed}>
           <input type="radio" name="duration" bind:group={durationSec} value={d.sec} />
           <span class="num">{d.label}</span>
         </label>
       {/each}
     </div>
+    {#if Number(durationSec) === LIMITS.untimed}
+      <p class="hint untimed-hint">You reveal the answers when the group is ready. If you leave, they stay hidden.</p>
+    {/if}
   </fieldset>
 
   {#if error}<p class="status bad" role="alert">{error}</p>{/if}
   <span class="visually-hidden" role="status">{saving ? "Saving draft…" : ""}</span>
   <div class="actions">
     <button type="submit" disabled={saving}>{saving ? "Saving…" : draft ? "Save draft" : "Create draft"}</button>
-    {#if draft && oncancel}
+    {#if oncancel}
       <button type="button" class="secondary" onclick={oncancel} disabled={saving}>Cancel</button>
     {/if}
   </div>
@@ -231,6 +235,8 @@
   .duration:hover:not(:has(input:disabled)) { border-color: var(--accent); }
   .duration.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: var(--shadow-s); }
   .duration:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .duration.wide { grid-column: span 2; }
+  .untimed-hint { margin: 0.5rem 0 0; }
   .duration input { position: absolute; opacity: 0; pointer-events: none; }
   .duration:has(input:disabled) { cursor: wait; opacity: 0.65; }
   .type:has(input:disabled) { cursor: wait; opacity: 0.65; }

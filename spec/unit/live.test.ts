@@ -38,6 +38,7 @@ function snapshot(version = 1): Snapshot {
     me: { id: "member-1", nickname: "Alice", isHost: true },
     current: null,
     history: [],
+    queue: [],
   };
 }
 

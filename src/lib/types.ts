@@ -29,6 +29,7 @@ export type QuestionView = {
   kind: QuestionKind;
   prompt: string;
   options: { id: string; label: string }[];
+  /** 0 means no time limit: the host reveals it. */
   durationSec: number;
   phase: Phase;
   deadline: number | null;
@@ -55,7 +56,10 @@ export type Snapshot = {
   now: number;
   org: { id: string; name: string; joinCode: string; memberCount: number };
   me: { id: string; nickname: string; isHost: boolean };
+  /** The question being answered or discussed. Never a draft. */
   current: QuestionView | null;
+  /** Drafts waiting to start, oldest first. Always empty for members. */
+  queue: QuestionView[];
   history: HistoryItem[];
 };
 

@@ -19,6 +19,8 @@ export const LIMITS = {
   likesPerQuestion: 3,
   minDurationSec: 5,
   maxDurationSec: 3600,
+  /** `durationSec` 0 means no time limit: the host reveals by hand. */
+  untimed: 0,
 } as const;
 
 /** A write is accepted only when the server decides strictly before the deadline. */

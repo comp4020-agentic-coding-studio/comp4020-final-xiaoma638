@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
+  import { LIMITS } from "#lib/domain/rules.ts";
   import { api, ApiError, LiveOrg } from "#lib/live.svelte.ts";
   import type { QuestionView, Snapshot } from "#lib/types.ts";
   import AnswerPile from "./AnswerPile.svelte";
@@ -23,7 +24,21 @@
   const q = $derived(s.current);
   const refresh = () => void live.refresh();
 
-  let editing = $state(false);
+  // Drafts are the host's queue; the first one is offered in the stage when nothing is live.
+  const next = $derived(s.queue[0] ?? null);
+  const rest = $derived(q ? s.queue : s.queue.slice(1));
+  let editingId = $state<string | null>(null);
+  let adding = $state(false);
+
+  function durationText(sec: number): string {
+    if (sec === LIMITS.untimed) return "No time limit";
+    return sec % 60 === 0 ? `${sec / 60} min` : `${sec} sec`;
+  }
+
+  async function removeDraft(d: QuestionView) {
+    if (!confirm(`Delete “${d.prompt}”? This can't be undone.`)) return;
+    await act(`/api/questions/${d.id}`, "DELETE");
+  }
   let actionError = $state("");
   let acting = $state(false);
   let copied = $state(false);
@@ -50,12 +65,12 @@
     });
   });
 
-  async function act(path: string) {
+  async function act(path: string, method = "POST") {
     if (acting) return;
     acting = true;
     actionError = "";
     try {
-      await api("POST", path);
+      await api(method, path);
       refresh();
     } catch (err) {
       actionError = err instanceof ApiError ? err.message : "That didn't work.";
@@ -141,9 +156,27 @@
   <button class="secondary" onclick={() => qrDialog?.close()}>Close</button>
 </dialog>
 
+{#snippet draftSummary(d: QuestionView)}
+  {#if d.kind === "choice"}
+    <ol class="preview-opts">{#each d.options as o (o.id)}<li>{o.label}</li>{/each}</ol>
+  {/if}
+  <p class="draft-note">{d.kind === "choice" ? "Single choice" : "Open answer"} · {durationText(d.durationSec)}</p>
+{/snippet}
+
 <section class="card stage" style:--stage-color="var(--phase-{q?.phase.toLowerCase() ?? 'draft'})" aria-labelledby="current-h">
   {#if !q}
-    {#if s.me.isHost}
+    {#if s.me.isHost && next && editingId === next.id}
+      <h2 id="current-h">Edit question</h2>
+      <Composer orgId={s.org.id} draft={next} oncancel={() => (editingId = null)} onchange={() => { editingId = null; refresh(); }} />
+    {:else if s.me.isHost && next}
+      <p class="eyebrow">Up next{s.queue.length > 1 ? ` · 1 of ${s.queue.length}` : ""}</p>
+      <h2 id="current-h" class="prompt">{next.prompt}</h2>
+      {@render draftSummary(next)}
+      <div class="host-bar">
+        <button onclick={() => act(`/api/questions/${next.id}/start`)} disabled={acting}>{acting ? "Starting…" : "Start question"}<span aria-hidden="true">→</span></button>
+        <button class="secondary" onclick={() => (editingId = next.id)} disabled={acting}>Edit</button>
+      </div>
+    {:else if s.me.isHost}
       <h2 id="current-h">New question</h2>
       <Composer orgId={s.org.id} onchange={refresh} />
     {:else}
@@ -154,34 +187,28 @@
       </div>
     {/if}
   {:else}
-    <PhaseBanner phase={q.phase} kind={q.kind} />
-    <h2 id="current-h" class="prompt">{q.phase === "DRAFT" && editing ? "Edit question" : q.prompt}</h2>
+    <PhaseBanner phase={q.phase} kind={q.kind} timed={q.deadline !== null} />
+    <h2 id="current-h" class="prompt">{q.prompt}</h2>
 
-    {#if q.phase === "DRAFT"}
-      {#if s.me.isHost}
-        {#if editing}
-          <Composer orgId={s.org.id} draft={q} oncancel={() => (editing = false)} onchange={() => { editing = false; refresh(); }} />
-        {:else}
-          {#if q.kind === "choice"}
-            <ol class="preview-opts">{#each q.options as o (o.id)}<li>{o.label}</li>{/each}</ol>
-          {/if}
-          <p class="draft-note">{q.durationSec % 60 === 0 ? `${q.durationSec / 60} min` : `${q.durationSec} sec`} to answer · Locks when started</p>
-          <div class="host-bar">
-            <button onclick={() => act(`/api/questions/${q.id}/start`)} disabled={acting}>{acting ? "Starting…" : "Start review"}<span aria-hidden="true">→</span></button>
-            <button class="secondary" onclick={() => (editing = true)} disabled={acting}>Edit draft</button>
-          </div>
-        {/if}
-      {/if}
-    {:else if q.phase === "COLLECTING" && q.deadline}
+    {#if q.phase === "COLLECTING"}
       <div class="live-stats">
-        <Countdown deadline={q.deadline} durationSec={q.durationSec} serverNow={() => live.serverNow()} />
+        {#if q.deadline}
+          <Countdown deadline={q.deadline} durationSec={q.durationSec} serverNow={() => live.serverNow()} />
+        {:else}
+          <p class="no-limit">No time limit</p>
+        {/if}
         <div class="answered">
           <AnswerPile count={q.submittedCount} />
           <p>{#key q.submittedCount}<span class="big num bump">{q.submittedCount}</span>{/key} <span class="muted">{q.submittedCount === 1 ? "response submitted" : "responses submitted"}</span></p>
         </div>
       </div>
+      {#if s.me.isHost && !q.deadline}
+        <div class="host-bar reveal-bar">
+          <button onclick={() => act(`/api/questions/${q.id}/reveal`)} disabled={acting}>{acting ? "Revealing…" : "Reveal answers"}</button>
+          <span class="hint">Locks answers and shows them to everyone.</span>
+        </div>
+      {/if}
     {/if}
-
   {/if}
 
   {#each responseQuestions as responseQuestion (responseQuestion.id)}
@@ -202,13 +229,50 @@
       {#if s.me.isHost && q.phase === "REVEALED"}
         <div class="host-bar end">
           <button class="secondary" onclick={() => act(`/api/questions/${q.id}/close`)} disabled={acting}>{acting ? "Closing…" : "Finish discussion"}</button>
-          <span class="hint">{q.kind === "open" ? "Saves results and locks likes." : "Saves results."}</span>
+          <span class="hint">{q.kind === "open" ? "Saves results and locks likes." : "Saves results."}{next ? ` Then: “${next.prompt}”` : ""}</span>
         </div>
       {/if}
     {/if}
 
   {#if actionError}<p class="status bad" role="alert">{actionError}</p>{/if}
 </section>
+
+{#if s.me.isHost && (q || s.queue.length > 0)}
+  <!-- The host's queue. Members never receive drafts, so this is host-only by data, not just by styling. -->
+  <section class="queue" aria-labelledby="queue-h">
+    <h2 id="queue-h">{q ? "Up next" : "Later"}{rest.length ? ` (${rest.length})` : ""}</h2>
+    {#if rest.length > 0}
+      <ol class="queue-list">
+        {#each rest as d, i (d.id)}
+          <li class:editing={editingId === d.id}>
+            {#if editingId === d.id}
+              <Composer orgId={s.org.id} draft={d} oncancel={() => (editingId = null)} onchange={() => { editingId = null; refresh(); }} />
+            {:else}
+              <span class="q-num num" aria-hidden="true">{i + (q ? 1 : 2)}</span>
+              <span class="q-body">
+                <span class="q-prompt">{d.prompt}</span>
+                <span class="q-meta">{d.kind === "choice" ? `Single choice · ${d.options.length} options` : "Open answer"} · {durationText(d.durationSec)}</span>
+              </span>
+              <span class="q-actions">
+                {#if !q}<button class="ghost small" onclick={() => act(`/api/questions/${d.id}/start`)} disabled={acting} aria-label="Start “{d.prompt}” now">Start</button>{/if}
+                <button class="ghost small" onclick={() => (editingId = d.id)} disabled={acting} aria-label="Edit “{d.prompt}”">Edit</button>
+                <button class="ghost small danger" onclick={() => removeDraft(d)} disabled={acting} aria-label="Delete “{d.prompt}”">Delete</button>
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    {/if}
+    {#if adding}
+      <div class="queue-add">
+        <h3>Add a question</h3>
+        <Composer orgId={s.org.id} oncancel={() => (adding = false)} onchange={() => { adding = false; refresh(); }} />
+      </div>
+    {:else}
+      <button class="secondary add" onclick={() => (adding = true)}>+ Add question</button>
+    {/if}
+  </section>
+{/if}
 
 {#if s.history.length > 0}
   <section class="history" aria-labelledby="history-h">
@@ -300,6 +364,28 @@
 
   .stage { margin-top: 0; padding: clamp(1.25rem, 4vw, 2rem); border-top: 3px solid color-mix(in srgb, var(--stage-color) 65%, var(--line)); }
   .prompt { font-size: clamp(1.5rem, 3.6vw, 2rem); margin: 1.4rem 0 1.5rem; line-height: 1.3; }
+  .eyebrow { margin: 0 0 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .no-limit { margin: 0; font-family: var(--font-display); font-size: clamp(1.4rem, 5vw, 1.8rem); font-weight: 600; color: var(--muted); }
+  .reveal-bar { margin: 0 0 1.1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+  .queue { margin-top: 1.5rem; }
+  .queue h2 { font-family: var(--font-body); font-size: 0.9rem; color: var(--muted); margin-bottom: 0.6rem; }
+  .queue-list { list-style: none; padding: 0; margin: 0 0 0.75rem; display: grid; gap: 0.5rem; }
+  .queue-list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.6rem 0.6rem 0.85rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .queue-list li.editing { display: block; padding: 1rem; }
+  .q-num { flex: none; width: 1.7rem; height: 1.7rem; display: grid; place-items: center; border-radius: 999px; background: var(--paper); border: 1px solid var(--line-strong); font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+  .q-body { flex: 1; min-width: 0; display: grid; gap: 0.1rem; }
+  .q-prompt { font-weight: 600; overflow-wrap: anywhere; }
+  .q-meta { font-size: 0.8rem; color: var(--muted); }
+  .q-actions { flex: none; display: flex; gap: 0.15rem; }
+  .q-actions .danger { color: var(--bad); }
+  .q-actions .danger:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); }
+  .queue-add { padding: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .queue-add h3 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+  .add { width: 100%; border-style: dashed; }
+  @media (max-width: 560px) {
+    .queue-list li:not(.editing) { flex-wrap: wrap; }
+    .q-actions { width: 100%; justify-content: flex-end; }
+  }
   .preview-opts { margin: 0 0 1rem; padding-left: 1.4rem; }
   .preview-opts li { margin: 0.25rem 0; }
   .draft-note { color: var(--muted); font-size: 0.9rem; margin: 1.25rem 0; }
