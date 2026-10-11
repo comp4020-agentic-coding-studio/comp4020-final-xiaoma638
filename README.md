@@ -22,6 +22,8 @@ their own view before they can see anyone else's. That means:
    in the data sent to the browser either.
 2. **The deadline is the same for everyone and cannot be stretched.** The
    server's clock decides, and the reveal happens even when the host has left.
+   A host may instead run a question with no time limit and reveal it by hand;
+   then the host's reveal is the one moment that ends answering for everyone.
 3. **"Saved" means saved.** Unsaved text is never lost or passed off as
    submitted.
 4. **Everyone knows which phase they are in** and what they can do now.

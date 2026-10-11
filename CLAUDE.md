@@ -4,9 +4,9 @@ This file guides developers and AI agents working on Silent Review Wall and defi
 
 ## Project Goals and Initial Scope
 
-- A host creates an organization, which is a shared review space, and shares its join code. Participants join and answer choice questions or open-ended questions. Results are revealed automatically when time expires.
+- A host creates an organization, which is a shared review space, and shares its join code. Participants join and answer choice questions or open-ended questions. Results are revealed automatically when time expires, or by the host for a question with no time limit.
 - Choice questions display vote charts. Open-ended questions display responses and a ranking by likes. The keyword bubble chart is an enhancement to add after the core response and reveal flow works.
-- Initially, each organization runs only one question at a time. Choice questions are single-choice. Result cards do not display authors' nicknames. Keywords initially come from tags supplied by participants.
+- A host may queue any number of draft questions, but each organization has at most one live question (`COLLECTING` or `REVEALED`) at a time, enforced by a database index. Drafts are the host's: members never receive a draft in any channel until it starts. Choice questions are single-choice. Result cards do not display authors' nicknames. Keywords initially come from tags supplied by participants.
 - Good means that other people's answers remain hidden until the reveal, everyone understands the current phase, result counts can be checked, and participants can continue after a disconnection or server restart. Invite classmates to try the application and record whether they can complete the flow without an explanation.
 
 Keep the product goals and their rationale in `README.md`. This file holds enduring implementation rules, while `spec/` verifies promises that can be checked automatically. If these initial choices change, update the rules, tests, and decision records together.
@@ -23,16 +23,16 @@ Keep the product goals and their rationale in `README.md`. This file holds endur
 
 | Phase | Permitted actions | Transition |
 | --- | --- | --- |
-| `DRAFT` | The host edits the question, options, and duration. Members may join. | Starting collection fixes the deadline. |
-| `COLLECTING` | Members submit or edit their own responses. Only the total submission count is shared. | The server reveals results automatically at the deadline. |
+| `DRAFT` | Host-only. The host edits, starts or deletes the question, in any order. Members may join. | Starting collection fixes the deadline, or none for an untimed question. Refused while another question is live. |
+| `COLLECTING` | Members submit or edit their own responses. Only the total submission count is shared. | A timed question reveals automatically at the deadline. An untimed question (`durationSec` 0) reveals only when the host reveals it. |
 | `REVEALED` | Responses are frozen. Members view charts and keywords and may like open-ended responses. | The host closes the discussion. |
-| `CLOSED` | Results and likes are read-only and retained in the history. | This question stays closed. The host may start a separate draft question. |
+| `CLOSED` | Results and likes are read-only and retained in the history. | This question stays closed. The host may start the next queued draft. |
 
 ## Response Rules
 
 ### Deadlines and Submission Consistency
 
-- Lock the question text, options, and deadline when collection starts. Persist the deadline and enforce it on the server; the client only displays the countdown. The initial version does not support early reveals or reopening questions.
+- Lock the question text, options, and deadline when collection starts. Persist the deadline and enforce it on the server; the client only displays the countdown. A timed question can never be revealed early. An untimed question has no deadline; the host's reveal and submissions are decided in the same transaction, so nothing is accepted after the reveal commits. If the host leaves, an untimed question stays hidden; say so where the host picks it. Questions are never reopened.
 - When saving a response, atomically validate identity, phase, and server time. Accept the write only when the server's decision time is strictly before the deadline. Reject it at or after the deadline. The client's click time is not authoritative.
 - Allow one response per identity per question, enforced by a database uniqueness constraint. Updates must include the response version they are based on. The server validates that version and increments it on success. Reject stale updates, preserve the user's input, and explain the conflict.
 - A single-choice response must reference a valid option belonging to that question. Reject blank open-ended responses and enforce a length limit. Apply consistent client and server validation, preserving input when validation fails.
@@ -75,6 +75,7 @@ Use SvelteKit and TypeScript for the frontend and backend, with `adapter-node` p
 - Separate pages, business rules, database access, and real-time notifications. Centralize state transitions, permissions, and counting rules on the server, with pages using the same interfaces.
 - Follow the course deployment constraint of one Fly machine and one persistent volume. Put the database file at the actual mounted path. Verify deployment, restarts, and upgrades early. Production data must not depend on process memory or temporary directories.
 - Make schema changes through new migration files committed with the corresponding code. Run migrations at application startup on the machine with the mounted volume. Do not solve compatibility issues by clearing data or modifying migrations that have already been applied.
+- Test every migration against a copy of a populated database, not only a fresh one. Table rebuilds drop a table other tables reference, and SQLite ignores `PRAGMA foreign_keys` inside drizzle's migration transaction, so migrations run with foreign keys off and a `foreign_key_check` must come back empty before they are turned on again.
 
 ## Data and Real-Time Synchronization
 
