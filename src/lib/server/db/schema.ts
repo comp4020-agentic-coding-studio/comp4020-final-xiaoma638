@@ -63,12 +63,13 @@ export const questions = sqliteTable(
     createdAt: integer("created_at").notNull(),
   },
   (t) => [
-    // one question at a time: at most one that isn't CLOSED per organization
-    uniqueIndex("questions_one_open_per_org").on(t.orgId).where(sql`phase <> 'CLOSED'`),
+    // drafts queue freely; at most one question is live (collecting or revealed) per organization
+    uniqueIndex("questions_one_live_per_org").on(t.orgId).where(sql`phase in ('COLLECTING', 'REVEALED')`),
     index("questions_org").on(t.orgId, t.createdAt),
     check("questions_kind", sql`${t.kind} in ('choice', 'open')`),
     check("questions_phase", sql`${t.phase} in ('DRAFT', 'COLLECTING', 'REVEALED', 'CLOSED')`),
-    check("questions_deadline", sql`${t.phase} = 'DRAFT' or ${t.deadline} is not null`),
+    // a started question has a deadline unless it is untimed (duration 0), which the host reveals
+    check("questions_deadline", sql`${t.phase} = 'DRAFT' or ${t.deadline} is not null or ${t.durationSec} = 0`),
   ],
 );
 

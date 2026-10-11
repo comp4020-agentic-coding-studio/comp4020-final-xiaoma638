@@ -20,10 +20,16 @@ export function db(): Db {
   mkdirSync(dirname(path), { recursive: true });
   const sqlite = new Database(path);
   sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
   sqlite.pragma("busy_timeout = 5000");
   const opened = drizzle(sqlite, { schema });
+  // A migration that rebuilds a table drops the old one while other tables
+  // still point at it. SQLite ignores the PRAGMA inside drizzle's transaction,
+  // so keys are switched off around the whole run and checked afterwards.
+  sqlite.pragma("foreign_keys = OFF");
   migrate(opened, { migrationsFolder: resolve(process.env.MIGRATIONS_DIR ?? "drizzle") });
+  const broken = sqlite.pragma("foreign_key_check") as unknown[];
+  if (broken.length > 0) throw new Error(`Migration left ${broken.length} broken foreign key reference(s).`);
+  sqlite.pragma("foreign_keys = ON");
   instance = opened;
   return opened;
 }
