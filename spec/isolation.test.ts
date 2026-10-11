@@ -30,7 +30,9 @@ describe("isolation before the reveal", () => {
       const snap = await viewer.req("GET", `/api/orgs/${orgId}/snapshot`);
       const detail = await viewer.req("GET", `/api/questions/${questionId}`);
       const page = await viewer.html(`/o/${orgId}`);
-      for (const text of [JSON.stringify(snap.body), JSON.stringify(detail.body), page.text]) {
+      const present = await viewer.html(`/o/${orgId}/present`);
+      expect(present.status).toBe(200);
+      for (const text of [JSON.stringify(snap.body), JSON.stringify(detail.body), page.text, present.text]) {
         expect(text).not.toContain(secret);
         expect(text).not.toContain(secretTag);
       }
@@ -51,6 +53,13 @@ describe("isolation before the reveal", () => {
     expect(after.body.current.phase).toBe("REVEALED");
     expect(after.body.current.results.responses.map((r: { text: string }) => r.text)).toContain(secret);
     expect(JSON.stringify(after.body.current.results)).not.toContain("Alice");
+  });
+
+  it("keeps the presentation screen for members only", async () => {
+    const host = new Client();
+    const stranger = new Client();
+    const { orgId } = await newOrg(host);
+    expect((await stranger.html(`/o/${orgId}/present`)).status).toBe(404);
   });
 
   it("hides choice statistics until the reveal", async () => {

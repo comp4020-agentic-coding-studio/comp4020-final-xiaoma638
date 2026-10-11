@@ -89,6 +89,33 @@ describe("open results and likes", () => {
     expect(old.results.total).toBe(2);
   });
 
+  it("limits each person to three likes per question, retries included", async () => {
+    const host = new Client();
+    const { orgId, code } = await newOrg(host);
+    const writers = [new Client(), new Client(), new Client(), new Client()];
+    for (const w of writers) await join(w, code);
+    const { questionId, deadline } = await startQuestion(host, orgId, { kind: "open" }, 5);
+    for (const [i, w] of writers.entries()) {
+      await w.req("PUT", `/api/questions/${questionId}/response`, { text: `answer ${i}`, baseVersion: 0 });
+    }
+    await waitPast(deadline);
+    const ids: string[] = (await host.req("GET", `/api/questions/${questionId}`)).body.results.responses.map((r: { id: string }) => r.id);
+    const like = (id: string, liked: boolean) => host.req("PUT", `/api/responses/${id}/like`, { liked });
+
+    for (const id of ids.slice(0, 3)) expect((await like(id, true)).status).toBe(200);
+    // repeating a like already counted is still fine at the limit
+    expect((await like(ids[0], true)).status).toBe(200);
+    const fourth = await like(ids[3], true);
+    expect(fourth.status).toBe(409);
+    expect(fourth.body.error).toBe("like_limit");
+    // removing one frees a like
+    await like(ids[0], false);
+    expect((await like(ids[3], true)).status).toBe(200);
+    const counts = (await host.req("GET", `/api/questions/${questionId}`)).body.results.responses
+      .filter((r: { likedByMe: boolean }) => r.likedByMe).length;
+    expect(counts).toBe(3);
+  });
+
   it("refuses likes before the reveal", async () => {
     const host = new Client();
     const alice = new Client();

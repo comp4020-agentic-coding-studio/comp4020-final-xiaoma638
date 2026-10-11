@@ -18,12 +18,21 @@
   } = $props();
 
   const DURATIONS = [
-    { sec: 30, label: "30 seconds" },
-    { sec: 60, label: "1 minute" },
-    { sec: 120, label: "2 minutes" },
-    { sec: 180, label: "3 minutes" },
-    { sec: 300, label: "5 minutes" },
-    { sec: 600, label: "10 minutes" },
+    { sec: 30, label: "30s" },
+    { sec: 60, label: "1m" },
+    { sec: 120, label: "2m" },
+    { sec: 180, label: "3m" },
+    { sec: 300, label: "5m" },
+    { sec: 600, label: "10m" },
+  ];
+
+  // Common first questions for a crit or retro. Offered only while the
+  // question box is empty, so picking one never replaces typed text.
+  const STARTERS: { label: string; kind: QuestionKind; prompt: string; options?: string[] }[] = [
+    { label: "What worked", kind: "open", prompt: "What worked well, and why?" },
+    { label: "Change one thing", kind: "open", prompt: "If you could change one thing, what would it be?" },
+    { label: "Still unclear", kind: "open", prompt: "What is still unclear to you?" },
+    { label: "Confidence check", kind: "choice", prompt: "How confident are you in this direction?", options: ["Very confident", "Somewhat confident", "Not yet"] },
   ];
 
   // svelte-ignore state_referenced_locally
@@ -34,9 +43,22 @@
   let optionLabels = $state<string[]>(draft && draft.options.length > 0 ? draft.options.map((o) => o.label) : ["", ""]);
   // svelte-ignore state_referenced_locally
   let durationSec = $state(draft?.durationSec ?? 120);
+  // A draft saved with an unusual duration keeps it as one more choice.
+  const durationChoices = $derived(
+    DURATIONS.some((d) => d.sec === Number(durationSec)) ? DURATIONS : [...DURATIONS, { sec: Number(durationSec), label: `${durationSec}s` }],
+  );
   let error = $state("");
   let saving = $state(false);
   let optionInputs = $state<HTMLInputElement[]>([]);
+  let promptInput = $state<HTMLTextAreaElement | null>(null);
+
+  async function useStarter(starter: (typeof STARTERS)[number]) {
+    kind = starter.kind;
+    prompt = starter.prompt;
+    if (starter.options) optionLabels = [...starter.options];
+    await tick();
+    promptInput?.focus();
+  }
 
   async function addOption() {
     optionLabels.push("");
@@ -84,7 +106,15 @@
   </fieldset>
 
   <label for="prompt">Question</label>
-  <textarea id="prompt" class="prompt" bind:value={prompt} maxlength={LIMITS.prompt} placeholder="What do you want the group to answer?" required disabled={saving}></textarea>
+  {#if !draft && prompt.trim() === ""}
+    <div class="starters" role="group" aria-label="Start from a common question">
+      <span class="hint">Start from</span>
+      {#each STARTERS as starter (starter.label)}
+        <button type="button" class="chip" onclick={() => useStarter(starter)} disabled={saving}>{starter.label}</button>
+      {/each}
+    </div>
+  {/if}
+  <textarea id="prompt" class="prompt" bind:this={promptInput} bind:value={prompt} maxlength={LIMITS.prompt} placeholder="What do you want the group to answer?" required disabled={saving}></textarea>
 
   {#if kind === "choice"}
     <fieldset disabled={saving}>
@@ -107,15 +137,17 @@
     </fieldset>
   {/if}
 
-  <label for="duration">Answering time</label>
-  <select id="duration" bind:value={durationSec} disabled={saving}>
-    {#each DURATIONS as d (d.sec)}
-      <option value={d.sec}>{d.label}</option>
-    {/each}
-    {#if !DURATIONS.some((d) => d.sec === Number(durationSec))}
-      <option value={durationSec}>{durationSec} seconds</option>
-    {/if}
-  </select>
+  <fieldset disabled={saving}>
+    <legend>Answering time</legend>
+    <div class="durations">
+      {#each durationChoices as d (d.sec)}
+        <label class="duration" class:selected={Number(durationSec) === d.sec}>
+          <input type="radio" name="duration" bind:group={durationSec} value={d.sec} />
+          <span class="num">{d.label}</span>
+        </label>
+      {/each}
+    </div>
+  </fieldset>
 
   {#if error}<p class="status bad" role="alert">{error}</p>{/if}
   <span class="visually-hidden" role="status">{saving ? "Saving draft…" : ""}</span>
@@ -167,7 +199,40 @@
     font-weight: 700; font-size: 0.9rem; color: var(--muted);
   }
   .remove { min-width: 44px; padding: 0.4rem; color: var(--muted); }
-  select { width: min(100%, 14rem); min-height: 44px; }
+  .starters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.1rem 0 0.55rem; }
+  .starters .hint { margin-right: 0.15rem; }
+  .chip {
+    min-height: 36px;
+    padding: 0.3rem 0.8rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    box-shadow: none;
+  }
+  .chip:hover:not(:disabled) { border-style: solid; border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .durations { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.8rem, 1fr)); gap: 0.4rem; max-width: 26rem; }
+  .duration {
+    position: relative;
+    display: grid; place-items: center;
+    min-height: 44px;
+    margin: 0;
+    padding: 0.4rem 0.25rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-s);
+    background: var(--paper);
+    font-weight: 600;
+    font-size: 0.92rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .duration:hover:not(:has(input:disabled)) { border-color: var(--accent); }
+  .duration.selected { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: var(--shadow-s); }
+  .duration:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .duration input { position: absolute; opacity: 0; pointer-events: none; }
+  .duration:has(input:disabled) { cursor: wait; opacity: 0.65; }
   .type:has(input:disabled) { cursor: wait; opacity: 0.65; }
   .actions { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; margin-top: 1.25rem; }
 </style>

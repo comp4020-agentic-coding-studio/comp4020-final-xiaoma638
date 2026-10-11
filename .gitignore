@@ -25,3 +25,4 @@ mise.local.toml
 .svelte-kit/
 build/
 data/
+verify-shots/

@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
   import { goto } from "$app/navigation";
   import { api, ApiError } from "#lib/live.svelte.ts";
   import { LIMITS } from "#lib/domain/rules.ts";
 
   let { data } = $props();
+  const RECENT = 3;
   let mode = $state<"join" | "host">("join");
   let createName = $state("");
   let createNick = $state("");
@@ -14,6 +16,29 @@
   let createError = $state("");
   let joinError = $state("");
   let busy = $state(false);
+  let joinNickInput = $state<HTMLInputElement | null>(null);
+
+  // A per-browser convenience only: the server never relies on it, and a
+  // private window that blocks storage just starts with an empty field.
+  const NICK_KEY = "srw-nickname";
+  function rememberNick(nick: string) {
+    try { localStorage.setItem(NICK_KEY, nick.trim()); } catch { /* storage unavailable */ }
+  }
+
+  onMount(async () => {
+    let saved = "";
+    try { saved = localStorage.getItem(NICK_KEY) ?? ""; } catch { /* storage unavailable */ }
+    if (saved) {
+      if (!joinNick) joinNick = saved;
+      if (!createNick) createNick = saved;
+    }
+    // Arriving from an invite, the code is filled in: the nickname is the only
+    // thing left. Skip the keyboard when it's already filled, so Join stays in view.
+    if (data.inviteCode && !joinNick) {
+      await tick();
+      joinNickInput?.focus();
+    }
+  });
 
   $effect(() => {
     const invite = data.inviteCode;
@@ -30,6 +55,7 @@
     createError = "";
     try {
       const { orgId } = await api<{ orgId: string }>("POST", "/api/orgs", { name: createName, nickname: createNick });
+      rememberNick(createNick);
       await goto(`/o/${orgId}`);
     } catch (err) {
       createError = err instanceof ApiError ? err.message : "Couldn't create your review. Please try again.";
@@ -43,6 +69,7 @@
     joinError = "";
     try {
       const { orgId } = await api<{ orgId: string }>("POST", "/api/join", { code: joinCode.trim(), nickname: joinNick });
+      rememberNick(joinNick);
       await goto(`/o/${orgId}`);
     } catch (err) {
       joinError = err instanceof ApiError ? err.message : "Couldn't join this review. Please try again.";
@@ -55,7 +82,10 @@
   <meta name="description" content="Private answers. A shared reveal. A quiet space for group feedback." />
 </svelte:head>
 
-<section class="hero" aria-labelledby="intro-h">
+<!-- Returning without an invite: their spaces come first. With an invite they came to join, so the form leads. -->
+{#if data.orgs.length > 0 && !data.inviteCode}{@render spaces(true)}{/if}
+
+<section class="hero" class:compact={data.orgs.length > 0 && !data.inviteCode} aria-labelledby="intro-h">
   <div class="pitch">
     <h1 id="intro-h">Answer alone.<br /><em>Reveal together.</em></h1>
     <p class="lede">A quiet space for group feedback.</p>
@@ -77,7 +107,7 @@
           <label for="join-code">Join code</label>
           <input id="join-code" class="code-input" type="text" bind:value={joinCode} autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123" required />
           <label for="join-nick">Nickname</label>
-          <input id="join-nick" type="text" bind:value={joinNick} maxlength={LIMITS.nickname} autocomplete="nickname" placeholder="e.g. Alex" required />
+          <input id="join-nick" type="text" bind:this={joinNickInput} bind:value={joinNick} maxlength={LIMITS.nickname} autocomplete="nickname" placeholder="e.g. Alex" required />
           {#if joinError}<p class="status bad" role="alert">{joinError}</p>{/if}
           <button type="submit" class="wide">{busy ? "Joining…" : "Join review"}<span aria-hidden="true">→</span></button>
         </fieldset>
@@ -108,21 +138,35 @@
   </section>
 </section>
 
-{#if data.orgs.length > 0}
-  <section class="returning" aria-labelledby="mine">
-    <h2 id="mine">Your spaces</h2>
-    <ul class="orgs">
-      {#each data.orgs as org (org.id)}
-        <li><a href="/o/{org.id}">
-          <span class="space-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="12" height="12" rx="2" /><path d="M15 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg></span>
-          <strong>{org.name}</strong>
-          {#if org.isHost}<span class="role">Host</span>{/if}
-          <span class="space-arrow" aria-hidden="true">→</span>
-        </a></li>
-      {/each}
-    </ul>
+{#snippet spaceList(list: typeof data.orgs)}
+  <ul class="orgs">
+    {#each list as org (org.id)}
+      <li><a href="/o/{org.id}">
+        <span class="space-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="12" height="12" rx="2" /><path d="M15 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></svg></span>
+        <strong>{org.name}</strong>
+        {#if org.isHost}<span class="role">Host</span>{/if}
+        <span class="space-arrow" aria-hidden="true">→</span>
+      </a></li>
+    {/each}
+  </ul>
+{/snippet}
+
+{#snippet spaces(first: boolean)}
+  <!-- Above the form only the latest few, so joining a new space stays close on a phone. -->
+  {@const shown = first ? data.orgs.slice(0, RECENT) : data.orgs}
+  <section class="returning" class:first aria-labelledby="mine">
+    <h2 id="mine">{first ? "Continue where you left off" : "Your spaces"}</h2>
+    {@render spaceList(shown)}
+    {#if data.orgs.length > shown.length}
+      <details class="disclosure more-spaces">
+        <summary>Show {data.orgs.length - shown.length} more</summary>
+        {@render spaceList(data.orgs.slice(shown.length))}
+      </details>
+    {/if}
   </section>
-{/if}
+{/snippet}
+
+{#if data.orgs.length > 0 && data.inviteCode}{@render spaces(false)}{/if}
 
 <style>
   .hero { max-width: 61rem; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(2rem, 6vw, 5rem); align-items: center; padding: clamp(2rem, 6vh, 4.5rem) 0 3rem; }
@@ -161,6 +205,10 @@
   .help-content li { margin-bottom: 0.6rem; }
   .help-content p { margin: 0; }
   .returning { max-width: 61rem; margin: 0 auto; border-top: 1px solid var(--line); padding-top: 1.5rem; }
+  .more-spaces { margin-top: 0.75rem; }
+  .more-spaces .orgs { margin-top: 0.5rem; }
+  .returning.first { border-top: 0; padding-top: clamp(1.25rem, 4vh, 2.5rem); }
+  .hero.compact { padding-top: clamp(1.5rem, 4vh, 2.5rem); }
   .returning h2 { font-family: var(--font-body); font-size: 0.9rem; font-weight: 600; color: var(--muted); margin-bottom: 1rem; }
   .orgs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; list-style: none; margin: 0; padding: 0; }
   .orgs a { display: flex; align-items: center; gap: 0.85rem; min-height: 72px; padding: 0.9rem 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; text-decoration: none; color: var(--ink); transition: border-color 0.15s, background 0.15s; }
@@ -182,5 +230,9 @@
     .entry-help { margin-top: 1rem; }
     .orgs { grid-template-columns: 1fr; }
     .returning { max-width: 28rem; }
+    .more-spaces { margin-top: 0.75rem; }
+  .more-spaces .orgs { margin-top: 0.5rem; }
+  .returning.first { padding-top: 1rem; }
+    .hero.compact { padding-top: 1.5rem; border-top: 1px solid var(--line); margin-top: 1.5rem; }
   }
 </style>

@@ -58,7 +58,7 @@ Keep the product goals and their rationale in `README.md`. This file holds endur
 
 ### Open-Ended Responses and Likes
 
-- Freeze the original responses after the reveal. Do not display authors' nicknames on result cards. Each identity may like each other person's response at most once and may remove its own like. Participants may like multiple responses but cannot like their own.
+- Freeze the original responses after the reveal. Do not display authors' nicknames on result cards. Each identity may like each other person's response at most once and may remove its own like. Each identity may like at most three responses per question (`LIMITS.likesPerQuestion`) and cannot like their own. Repeating a like already given does not use another; removing a like frees it. Show how many likes remain.
 - Like and unlike requests must specify the intended state. Retrying a request must not toggle the state repeatedly or duplicate the count. Freeze likes when the discussion closes.
 - Offer both original order and ordering by likes. Initially display responses in first-submission order. For the ranking, sort by like count descending, first-submission time ascending, and then response ID, consistently across clients. Preserve reading position and keyboard focus when updating the ranking.
 
@@ -94,6 +94,7 @@ Use SvelteKit and TypeScript for the frontend and backend, with `adapter-node` p
 - Only show an up-to-date connection after the authoritative snapshot has caught up. Retry failed snapshot requests even while SSE remains open, and release listeners, requests and timers when the page is left. Own the connection in the component mount lifecycle, not an effect that tracks incoming snapshots.
 - Phase guidance must match the question type. Draft editing has a cancel path; joining and hosting must both be readily reachable on a phone. Counts label submitted responses separately from membership.
 - Support the same core flow on desktop and mobile, including keyboard operation, visible focus, and form labels. Supplement colors and bubble sizes with text that explains their meaning.
+- The presentation screen (`/o/[orgId]/present`) is for a shared display. It is member-only and shows only what every member can see: no response form, no "your answer" or "your choice" markers. Keep the invite QR code and join code visible until the reveal. QR codes always render dark on light for scanning.
 - Render question text, nicknames, responses, and tags as plain text. Do not execute user-provided HTML or scripts.
 - Keep previous questions accessible in the history. Creating a new question must not overwrite earlier records. Only organization members may access results. Join codes must not appear in public logs.
 
@@ -115,7 +116,7 @@ Inspect the actual repository scripts first, then document the development, buil
 | Response uniqueness | Retries and concurrent edits from multiple tabs do not create multiple responses. Stale versions receive explicit conflict feedback. |
 | Automatic reveal and recovery | Results are revealed even when the host is offline. Restarts preserve the deadline. Expired `COLLECTING` questions recover as `REVEALED`; `CLOSED` questions stay closed. |
 | Correct statistics | Use known fixtures to verify votes, percentages, tag deduplication, and bubble frequencies. Cover zero responses, repeated tags, and missing keywords. |
-| Consistent likes | Retries do not duplicate counts; self-likes are rejected; unliking affects only the caller's like; ties sort consistently; closed discussions reject likes and unlikes. |
+| Consistent likes | Retries do not duplicate counts; a fourth like is rejected until one is removed; self-likes are rejected; unliking affects only the caller's like; ties sort consistently; closed discussions reject likes and unlikes. |
 | Real-time updates and disconnections | Use two independent browsers to verify progress, reveal, and like updates. Reconnection restores state without a manual refresh. Old snapshots do not overwrite newer state. |
 | Persistence and migrations | Restart and redeploy with saved test data. Organizations, responses, likes, and permissions survive. Migrations preserve existing data. |
 | Interface and usability | Check 1920×1080 and 390×844 viewports, keyboard use, long text, special characters, and network failures. Invite classmates to complete a review independently. |

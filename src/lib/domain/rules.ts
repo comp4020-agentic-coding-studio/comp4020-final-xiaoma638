@@ -16,6 +16,7 @@ export const LIMITS = {
   openText: 500,
   maxTags: 3,
   tag: 24,
+  likesPerQuestion: 3,
   minDurationSec: 5,
   maxDurationSec: 3600,
 } as const;
@@ -116,4 +117,18 @@ export function compareByLikes(a: Rankable, b: Rankable): number {
 /** Original order: first submission time, then id. */
 export function compareBySubmission(a: Rankable, b: Rankable): number {
   return a.submittedAt - b.submittedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/**
+ * Bubble diameters for the keyword chart. Area is proportional to frequency:
+ * the least frequent keyword gets `minDiameter`, and the rest scale by the
+ * square root of their ratio to it. If that would exceed `maxDiameter`, every
+ * bubble shrinks by the same factor so the ratios still hold.
+ */
+export function bubbleDiameters(counts: number[], minDiameter = 44, maxDiameter = 160): number[] {
+  if (counts.length === 0) return [];
+  const least = Math.min(...counts);
+  const raw = counts.map((count) => minDiameter * Math.sqrt(count / least));
+  const scale = Math.min(1, maxDiameter / Math.max(...raw));
+  return raw.map((d) => d * scale);
 }

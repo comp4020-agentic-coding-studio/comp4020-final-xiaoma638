@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   acceptsAt,
+  bubbleDiameters,
   compareByLikes,
   compareBySubmission,
   effectivePhase,
@@ -93,5 +94,23 @@ describe("ordering", () => {
 
   it("keeps original order by submission time, then id", () => {
     expect([...rows].sort(compareBySubmission).map((r) => r.id)).toEqual(["r0", "r1", "r2", "r3"]);
+  });
+});
+
+describe("keyword bubbles", () => {
+  const area = (d: number) => Math.PI * (d / 2) ** 2;
+  it("makes area proportional to frequency", () => {
+    const [a, b, c] = bubbleDiameters([4, 2, 1]);
+    expect(area(a) / area(c)).toBeCloseTo(4);
+    expect(area(b) / area(c)).toBeCloseTo(2);
+    expect(c).toBe(44);
+  });
+  it("shrinks every bubble alike when the largest would be too big", () => {
+    const [big, small] = bubbleDiameters([100, 1], 44, 160);
+    expect(big).toBeCloseTo(160);
+    expect(area(big) / area(small)).toBeCloseTo(100);
+  });
+  it("has nothing to draw without keywords", () => {
+    expect(bubbleDiameters([])).toEqual([]);
   });
 });

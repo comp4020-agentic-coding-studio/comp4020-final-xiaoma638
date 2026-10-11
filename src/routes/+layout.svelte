@@ -1,9 +1,13 @@
 <script lang="ts">
   import "@fontsource-variable/fraunces";
   import "../app.css";
+  import { page } from "$app/state";
   let { children } = $props();
+  // The shared screen takes the whole viewport.
+  const presenting = $derived(page.route.id?.endsWith("/present") ?? false);
 </script>
 
+{#if !presenting}
 <a class="skip" href="#main">Skip to content</a>
 <header class="site">
   <div class="inner">
@@ -20,6 +24,7 @@
     </nav>
   </div>
 </header>
+{/if}
 <main id="main">
   {@render children()}
 </main>

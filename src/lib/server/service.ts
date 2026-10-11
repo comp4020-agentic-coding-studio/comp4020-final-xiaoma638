@@ -388,6 +388,18 @@ export function questionDetail(questionId: string, participantId: string | null)
   });
 }
 
+/** A past question's page: the view plus what the page may offer this member. */
+export function historyDetail(
+  questionId: string,
+  participantId: string | null,
+): { question: QuestionView; orgId: string; isHost: boolean } {
+  return write((tx, ctx) => {
+    const { q, m } = requireQuestion(tx, questionId, participantId);
+    reconcile(tx, ctx, q.orgId, "read");
+    return { question: view(tx, reload(tx, q.id), m.participantId, ctx.now), orgId: q.orgId, isHost: m.role === "host" };
+  });
+}
+
 // ---------------------------------------------------------------- questions
 
 function parseQuestion(body: Record<string, unknown>) {
@@ -638,6 +650,17 @@ export function setLike(actor: Actor, responseId: string, body: Record<string, u
     if (phase !== "REVEALED") throw refuse(event, fields, new AppError(409, "not_revealed", "Answers aren't revealed yet."));
     if (r.participantId === actor.participantId) {
       throw refuse(event, fields, new AppError(403, "own_response", "You can't like your own answer."));
+    }
+    if (liked) {
+      const already = tx.select().from(likes)
+        .where(and(eq(likes.responseId, responseId), eq(likes.participantId, actor.participantId))).get();
+      const used = tx.select({ n: count() }).from(likes)
+        .innerJoin(responses, eq(likes.responseId, responses.id))
+        .where(and(eq(responses.questionId, q.id), eq(likes.participantId, actor.participantId))).get()?.n ?? 0;
+      if (!already && used >= LIMITS.likesPerQuestion) {
+        throw refuse(event, fields, new AppError(409, "like_limit",
+          `You've used all ${LIMITS.likesPerQuestion} likes. Remove one to like another answer.`));
+      }
     }
     const changed = liked
       ? tx.insert(likes).values({ responseId, participantId: actor.participantId, createdAt: ctx.now }).onConflictDoNothing().run().changes

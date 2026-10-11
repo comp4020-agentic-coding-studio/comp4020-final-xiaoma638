@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { LIMITS, normaliseTags } from "#lib/domain/rules.ts";
   import { api, ApiError } from "#lib/live.svelte.ts";
   import { draftFromResponse, draftMatchesResponse, hasDraftContent, reconcileSavedDraft } from "#lib/response-draft.ts";
@@ -18,6 +19,8 @@
   let confirmed = $state<MyResponse | null>(null);
   let copyStatus = $state("");
   let dismissed = $state(false);
+  let submitButton = $state<HTMLButtonElement | null>(null);
+  let savedBadge = $state<HTMLElement | null>(null);
 
   const collecting = $derived(question.phase === "COLLECTING");
   const draft = $derived({ optionId, text, tagsInput });
@@ -71,6 +74,8 @@
       status = { kind: "bad", message: checkedTags.error };
       return;
     }
+    // The button gives way to the confirmation, so keyboard focus follows it there.
+    const fromButton = document.activeElement === submitButton;
     saving = true;
     status = { kind: "warn", message: "Saving…" };
     const submitted = { optionId, text, tagsInput };
@@ -87,6 +92,11 @@
         ? { kind: "warn", message: "Your previous answer was saved. Your latest changes still need to be submitted." }
         : { kind: "ok", message: "Saved. You can change it until the time runs out." };
       onchange();
+      if (fromButton && !acknowledgement.hasNewEdits) {
+        saving = false;
+        await tick();
+        savedBadge?.focus();
+      }
     } catch (err) {
       if (err instanceof ApiError && err.code === "stale_version") {
         conflict = (err.body.current as MyResponse | null) ?? null;
@@ -187,13 +197,21 @@
   {/if}
 
   <div class="actions">
-    <button type="submit" class="big" disabled={saving || matchesSaved}>{saving ? "Saving…" : savedLabel}</button>
-    {#if saving}
-      <span class="visually-hidden" role="status">Saving your answer…</span>
-    {:else if matchesSaved}
-      <span class="saved-badge" role="status">✓ Saved</span>
-    {:else if dirty}
-      <span class="muted">Unsaved changes</span>
+    {#if matchesSaved && !saving}
+      <!-- Equal to the server's copy: nothing to submit, so say so plainly instead of showing a disabled button. -->
+      <p class="saved-badge" role="status" tabindex="-1" bind:this={savedBadge}>
+        <span class="tick" aria-hidden="true">✓</span>
+        <span><strong>{question.kind === "choice" ? "Vote submitted" : "Answer submitted"}</strong><span class="saved-note">Hidden until the reveal. Edit it any time before then.</span></span>
+      </p>
+    {:else}
+      <button type="submit" class="big" disabled={saving} bind:this={submitButton}>{saving ? "Saving…" : savedLabel}</button>
+      {#if saving}
+        <span class="visually-hidden" role="status">Saving your answer…</span>
+      {:else if dirty && savedResponse}
+        <span class="muted">Changed since you submitted</span>
+      {:else if dirty}
+        <span class="muted">Not submitted yet</span>
+      {/if}
     {/if}
   </div>
 </form>
@@ -269,7 +287,26 @@
   .conflict p { margin: 0 0 0.5rem; }
   .saved { white-space: pre-wrap; }
   .actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.25rem; }
-  .saved-badge { color: var(--ok); font-weight: 600; font-size: 0.95rem; }
+  .saved-badge {
+    display: flex; align-items: center; gap: 0.75rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+    border-radius: var(--radius-s);
+    background: var(--ok-soft);
+    color: var(--ink);
+    animation: saved 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+  .saved-badge:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .saved-badge strong { display: block; color: var(--ok); font-size: 1rem; }
+  .saved-note { display: block; color: var(--ink-soft); font-size: 0.88rem; }
+  .tick {
+    flex: none; width: 2rem; height: 2rem; display: grid; place-items: center;
+    border-radius: 999px; background: var(--ok); color: var(--paper); font-weight: 700;
+  }
+  @keyframes saved { from { opacity: 0; transform: translateY(0.3rem); } }
+  @media (prefers-reduced-motion: reduce) { .saved-badge { animation: none; } }
   .recovery { margin: 1.25rem 0; padding: 1rem; background: var(--paper); border: 1px solid var(--line-strong); border-left: 4px solid var(--warn); border-radius: var(--radius-s); }
   .recovery-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
   .recovery-header h3 { margin: 0; }
