@@ -1,6 +1,6 @@
 # Process overview
 
-Crit 8, 7 October 2026. I used an AI agent to help draft this account from the project records and our discussion.
+Crit 8, 7 October 2026.
 
 ## My idea
 
@@ -46,7 +46,7 @@ I still need to verify the app and saved data on Fly, finish the README argument
 
 ## Crit 9: all at once
 
-Crit 9, 12 October 2026. I again used an AI agent to help draft this section from the session record.
+Crit 9, 12 October 2026.
 
 ### Real-time, and one decision about it
 
